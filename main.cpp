@@ -59,6 +59,7 @@ BOOL ExecuteCommand(const std::string& cmd, DWORD flags, bool isProtected, LPHAN
 std::string HttpGet(const std::string& host, const std::string& path);
 bool DownloadFile(const std::string& url, const std::string& localPath);
 bool ExtractZip(const std::string& zipPath, const std::string& destPath);
+std::string ExtractFirstJsonObject(const std::string& json);
 std::string ParseJsonString(const std::string& json, const std::string& key);
 std::string GetTempFilePath();
 std::string GetExeDirectory();
@@ -316,6 +317,46 @@ bool DownloadFile(const std::string& url, const std::string& localPath) {
     WinHttpCloseHandle(hConnect);
     WinHttpCloseHandle(hSession);
     return bResults == TRUE;
+}
+
+std::string ExtractFirstJsonObject(const std::string& json) {
+    size_t start = json.find('{');
+    if (start == std::string::npos) return "";
+    
+    int depth = 0;
+    bool inString = false;
+    bool escape = false;
+    
+    for (size_t i = start; i < json.length(); i++) {
+        char c = json[i];
+        
+        if (escape) {
+            escape = false;
+            continue;
+        }
+        
+        if (c == '\\' && inString) {
+            escape = true;
+            continue;
+        }
+        
+        if (c == '"') {
+            inString = !inString;
+            continue;
+        }
+        
+        if (!inString) {
+            if (c == '{') depth++;
+            else if (c == '}') {
+                depth--;
+                if (depth == 0) {
+                    return json.substr(start, i - start + 1);
+                }
+            }
+        }
+    }
+    
+    return "";
 }
 
 std::string ParseJsonString(const std::string& json, const std::string& key) {
@@ -838,23 +879,15 @@ void HandleUpdate() {
     
     LogInfo("GitHub API response received, length: " + std::to_string(response.length()));
     
-    size_t releaseStart = response.find('{');
-    if (releaseStart == std::string::npos) {
-        LogError("No JSON object found in response");
+    LogInfo("Extracting first release object from JSON array");
+    std::string firstRelease = ExtractFirstJsonObject(response);
+    if (firstRelease.empty()) {
+        LogError("Failed to extract first JSON object from response");
         LogDebug("Response content: " + response.substr(0, 500));
         ShowMessage("错误", "无法解析 GitHub API 响应。", MB_ICONERROR);
         return;
     }
-    LogDebug("First JSON object found at position: " + std::to_string(releaseStart));
-    
-    std::string firstRelease = response.substr(releaseStart);
-    size_t releaseEnd = firstRelease.find("},");
-    if (releaseEnd != std::string::npos) {
-        firstRelease = firstRelease.substr(0, releaseEnd + 1);
-        LogDebug("Extracted first release object, length: " + std::to_string(firstRelease.length()));
-    } else {
-        LogDebug("No '},' found, using remaining response as first release");
-    }
+    LogDebug("Extracted first release object, length: " + std::to_string(firstRelease.length()));
     
     LogInfo("Parsing zipball_url from first release");
     std::string zipUrl = ParseJsonString(firstRelease, "zipball_url");
@@ -991,20 +1024,14 @@ void HandleInit() {
         } else {
             LogInfo("GitHub API response received, length: " + std::to_string(response.length()));
             
-            size_t releaseStart = response.find('{');
-            if (releaseStart == std::string::npos) {
-                LogError("No JSON object found in response");
+            LogInfo("Extracting first release object from JSON array");
+            std::string firstRelease = ExtractFirstJsonObject(response);
+            if (firstRelease.empty()) {
+                LogError("Failed to extract first JSON object from response");
                 int retry = ShowMessage("错误", "无法解析 GitHub API 响应。\n\n是否继续使用当前代码初始化？", MB_YESNO | MB_ICONWARNING);
                 if (retry != IDYES) return;
             } else {
-                LogDebug("First JSON object found at position: " + std::to_string(releaseStart));
-                
-                std::string firstRelease = response.substr(releaseStart);
-                size_t releaseEnd = firstRelease.find("},");
-                if (releaseEnd != std::string::npos) {
-                    firstRelease = firstRelease.substr(0, releaseEnd + 1);
-                    LogDebug("Extracted first release object, length: " + std::to_string(firstRelease.length()));
-                }
+                LogDebug("Extracted first release object, length: " + std::to_string(firstRelease.length()));
                 
                 LogInfo("Parsing zipball_url from first release");
                 std::string zipUrl = ParseJsonString(firstRelease, "zipball_url");
