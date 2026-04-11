@@ -1100,6 +1100,7 @@ bool ExtractZip(const std::string& zipPath, const std::string& destPath) {
 bool UpdateFromRelease(const std::string& zipUrl) {
     std::string tempZip = GetTempFilePath() + ".zip";
     std::string tempDir = tempZip.substr(0, tempZip.length() - 4);
+    DeleteFileA(tempDir.c_str());
     SHCreateDirectoryExA(NULL, tempDir.c_str(), NULL);
     
     LogInfo("=== UpdateFromRelease started ===");
