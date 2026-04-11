@@ -840,10 +840,7 @@ void AutoInitOnFirstRun() {
     ShowMessage("首次启动", "检测到首次运行，正在自动初始化...", MB_ICONINFORMATION);
     
     std::string exeDir = GetExeDirectory();
-    
-    if (!SetDirectoryPermissionsAdminOnly(exeDir)) {
-        ShowMessage("警告", "设置目录权限时遇到问题，继续初始化...", MB_ICONWARNING);
-    }
+    bool initSuccess = false;
     
     if (RunCommand("where uv") != 0) {
         ShowMessage("提示", "未检测到 uv，正在通过国内代理自动安装...", MB_ICONINFORMATION);
@@ -852,6 +849,7 @@ void AutoInitOnFirstRun() {
             return;
         }
         RefreshEnvironment();
+        Sleep(1000);
     }
     
     ShowMessage("提示", "即将弹出黑框执行 uv sync...\n(Python解释器和依赖包均使用国内镜像加速)", MB_ICONINFORMATION);
@@ -864,16 +862,26 @@ void AutoInitOnFirstRun() {
         CloseHandle(hProcess);
         
         if (exitCode == 0) {
-            if (MarkAsInitialized()) {
-                ShowMessage("成功", "首次启动初始化完成！\n\n目录权限已设置为仅管理员可访问。", MB_ICONINFORMATION);
-            } else {
-                ShowMessage("成功", "首次启动初始化完成！\n\n但标记文件创建失败。", MB_ICONWARNING);
-            }
+            initSuccess = true;
         } else {
             ShowMessage("警告", "uv sync 执行异常，请查看弹出的黑框日志。", MB_ICONWARNING);
+            return;
         }
     } else {
         ShowMessage("错误", "无法执行 uv sync。", MB_ICONERROR);
+        return;
+    }
+    
+    if (initSuccess) {
+        if (!SetDirectoryPermissionsAdminOnly(exeDir)) {
+            ShowMessage("警告", "初始化完成，但设置目录权限时遇到问题。", MB_ICONWARNING);
+        }
+        
+        if (MarkAsInitialized()) {
+            ShowMessage("成功", "首次启动初始化完成！\n\n目录权限已设置为仅管理员可访问。", MB_ICONINFORMATION);
+        } else {
+            ShowMessage("成功", "首次启动初始化完成！\n\n但标记文件创建失败。", MB_ICONWARNING);
+        }
     }
 }
 
