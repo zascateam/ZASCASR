@@ -1081,7 +1081,6 @@ bool ExtractZip(const std::string& zipPath, const std::string& destPath) {
         LogError("Extraction timeout after 60 seconds");
     }
     
-    std::string tempFile = destPath + "\\.placeholder";
     DeleteFileA(tempFile.c_str());
     LogDebug("Removed placeholder file");
     
