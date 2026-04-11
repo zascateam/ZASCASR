@@ -1406,12 +1406,18 @@ DWORD RunCommand(const std::string& cmd, bool isProtected) {
 }
 
 DWORD RunCommandWithOutput(const std::string& cmd, std::string& output, bool isProtected) {
+    HANDLE hReadPipe = NULL, hWritePipe = NULL;
+    HANDLE hProcess = NULL;
+    PSECURITY_DESCRIPTOR pSD = NULL;
+    LPVOID envBlock = NULL;
+    char* cmdBuf = NULL;
+    DWORD exitCode = 1;
+
     SECURITY_ATTRIBUTES saAttr;
     saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
     saAttr.bInheritHandle = TRUE;
     saAttr.lpSecurityDescriptor = NULL;
 
-    HANDLE hReadPipe = NULL, hWritePipe = NULL;
     if (!CreatePipe(&hReadPipe, &hWritePipe, &saAttr, 0)) {
         LogError("Failed to create pipe for command output, error: " + std::to_string(GetLastError()));
         return GetLastError();
@@ -1428,7 +1434,6 @@ DWORD RunCommandWithOutput(const std::string& cmd, std::string& output, bool isP
     si.hStdError = hWritePipe;
     ZeroMemory(&pi, sizeof(pi));
 
-    PSECURITY_DESCRIPTOR pSD = NULL;
     SECURITY_ATTRIBUTES procSA = {0};
     if (isProtected) {
         pSD = CreateProtectedSD();
@@ -1439,8 +1444,8 @@ DWORD RunCommandWithOutput(const std::string& cmd, std::string& output, bool isP
         }
     }
 
-    LPVOID envBlock = CreateChinaMirrorEnvBlock();
-    char* cmdBuf = new char[cmd.length() + 1];
+    envBlock = CreateChinaMirrorEnvBlock();
+    cmdBuf = new char[cmd.length() + 1];
     strcpy_s(cmdBuf, cmd.length() + 1, cmd.c_str());
 
     LogInfo("Executing command: " + cmd);
@@ -1448,18 +1453,17 @@ DWORD RunCommandWithOutput(const std::string& cmd, std::string& output, bool isP
     BOOL success = CreateProcessA(NULL, cmdBuf, isProtected ? &procSA : NULL, NULL, TRUE,
                                    CREATE_NO_WINDOW, envBlock, NULL, &si, &pi);
 
-    delete[] cmdBuf;
-    FreeEnvBlock(envBlock);
-    CloseHandle(hWritePipe);
-    if (pSD) LocalFree(pSD);
-
     if (!success) {
         LogError("Failed to create process, error: " + std::to_string(GetLastError()));
-        CloseHandle(hReadPipe);
-        return GetLastError();
+        exitCode = GetLastError();
+        goto cleanup;
     }
 
+    hProcess = pi.hProcess;
     CloseHandle(pi.hThread);
+
+    CloseHandle(hWritePipe);
+    hWritePipe = NULL;
 
     char buffer[4096];
     DWORD bytesRead;
@@ -1467,12 +1471,9 @@ DWORD RunCommandWithOutput(const std::string& cmd, std::string& output, bool isP
         buffer[bytesRead] = '\0';
         output += buffer;
     }
-    CloseHandle(hReadPipe);
 
-    WaitForSingleObject(pi.hProcess, INFINITE);
-    DWORD exitCode = 0;
-    GetExitCodeProcess(pi.hProcess, &exitCode);
-    CloseHandle(pi.hProcess);
+    WaitForSingleObject(hProcess, INFINITE);
+    GetExitCodeProcess(hProcess, &exitCode);
 
     LogInfo("Command exit code: " + std::to_string(exitCode));
     if (!output.empty()) {
@@ -1482,6 +1483,14 @@ DWORD RunCommandWithOutput(const std::string& cmd, std::string& output, bool isP
             LogInfo("Command output:\n" + output);
         }
     }
+
+cleanup:
+    if (hReadPipe) CloseHandle(hReadPipe);
+    if (hWritePipe) CloseHandle(hWritePipe);
+    if (hProcess) CloseHandle(hProcess);
+    if (cmdBuf) delete[] cmdBuf;
+    if (envBlock) FreeEnvBlock(envBlock);
+    if (pSD) LocalFree(pSD);
 
     return exitCode;
 }
