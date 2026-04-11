@@ -857,8 +857,8 @@ bool ExtractZip(const std::string& zipPath, const std::string& destPath) {
         WIN32_FIND_DATAA findData;
         std::string searchPath = destPath + "\\*";
         HANDLE hFind = FindFirstFileA(searchPath.c_str(), &findData);
+        int extractedCount = 0;
         if (hFind != INVALID_HANDLE_VALUE) {
-            int extractedCount = 0;
             do {
                 if (strcmp(findData.cFileName, ".") != 0 && strcmp(findData.cFileName, "..") != 0) {
                     extractedCount++;
