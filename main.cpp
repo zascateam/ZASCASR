@@ -17,9 +17,8 @@
 
 #define SERVICE_NAME "DjangoGuardSvc"
 #define DISPLAY_NAME "Django Environment Guard Service"
-#define GITHUB_API_URL "api.github.com"
+#define GITHUB_API_URL "api.zasca.cc.cd"
 #define GITHUB_RELEASES_PATH "/repos/trustedinster/ZASCA/releases"
-#define MIRROR_BASE_URL "https://ghproxy.sectl.top/"
 
 SERVICE_STATUS        g_ServiceStatus = {0};
 SERVICE_STATUS_HANDLE g_StatusHandle = NULL;
@@ -134,7 +133,7 @@ LPVOID CreateChinaMirrorEnvBlock() {
     }
     FreeEnvironmentStrings(parentEnv);
 
-    envBlock += "UV_INSTALLER_GITHUB_BASE_URL=https://ghfast.top/https://github.com/\0";
+    envBlock += "UV_INSTALLER_GITHUB_BASE_URL=https://zasca.cc.cd/https://github.com/\0";
     envBlock += "UV_PYTHON_INSTALL_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/python/\0";
     envBlock += "UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple\0";
     
@@ -1018,15 +1017,12 @@ void HandleUpdate() {
     LogInfo("  tag_name: " + tagName);
     LogInfo("  zipball_url: " + zipUrl);
     
-    std::string mirrorUrl = MIRROR_BASE_URL + zipUrl;
-    LogInfo("Mirror URL: " + mirrorUrl);
-    
-    std::string msg = "发现最新版本: " + tagName + "\n\n是否立即更新？\n\n下载源: " + mirrorUrl;
+    std::string msg = "发现最新版本: " + tagName + "\n\n是否立即更新？\n\n下载源: " + zipUrl;
     int result = MessageBoxW(NULL, Utf8ToWide(msg).c_str(), Utf8ToWide("发现更新").c_str(), MB_YESNO | MB_ICONQUESTION | MB_TOPMOST);
     
     if (result == IDYES) {
         LogInfo("User confirmed update, starting download...");
-        if (UpdateFromRelease(mirrorUrl)) {
+        if (UpdateFromRelease(zipUrl)) {
             LogInfo("Update completed successfully, restarting...");
             ShowMessage("成功", "更新完成！程序即将重启。", MB_ICONINFORMATION);
             
@@ -1161,15 +1157,12 @@ void HandleInit() {
                     LogInfo("  tag_name: " + tagName);
                     LogInfo("  zipball_url: " + zipUrl);
                     
-                    std::string mirrorUrl = MIRROR_BASE_URL + zipUrl;
-                    LogInfo("Mirror URL: " + mirrorUrl);
-                    
-                    std::string msg = "发现最新版本: " + tagName + "\n\n是否立即下载更新？\n\n下载源: " + mirrorUrl;
+                    std::string msg = "发现最新版本: " + tagName + "\n\n是否立即下载更新？\n\n下载源: " + zipUrl;
                     int result = ShowMessage("发现更新", msg, MB_YESNO | MB_ICONQUESTION);
                     
                     if (result == IDYES) {
                         LogInfo("User confirmed download, starting...");
-                        if (!UpdateFromRelease(mirrorUrl)) {
+                        if (!UpdateFromRelease(zipUrl)) {
                             LogError("UpdateFromRelease failed");
                             int retry = ShowMessage("更新失败", "更新失败，是否继续使用当前代码初始化？", MB_YESNO | MB_ICONWARNING);
                             if (retry != IDYES) return;
