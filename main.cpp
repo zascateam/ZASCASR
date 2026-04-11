@@ -216,9 +216,12 @@ LPVOID CreateChinaMirrorEnvBlock() {
     }
     FreeEnvironmentStrings(parentEnv);
 
-    envBlock += "UV_INSTALLER_GITHUB_BASE_URL=https://zasca.cc.cd/\0";
-    envBlock += "UV_PYTHON_INSTALL_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/python/\0";
-    envBlock += "UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple\0";
+    envBlock += "UV_INSTALLER_GITHUB_BASE_URL=https://zasca.cc.cd";
+    envBlock += '\0';
+    envBlock += "UV_PYTHON_INSTALL_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/python/";
+    envBlock += '\0';
+    envBlock += "UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple";
+    envBlock += '\0';
     
     envBlock += '\0';
 
@@ -889,8 +892,15 @@ bool ExtractZip(const std::string& zipPath, const std::string& destPath) {
     
     DWORD attrs = GetFileAttributesW(wDestPath.c_str());
     if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
-        LogError("Destination directory does not exist: " + destPath);
-        return false;
+        LogInfo("Destination directory does not exist, creating: " + destPath);
+        if (!CreateDirectoryA(destPath.c_str(), NULL)) {
+            DWORD err = GetLastError();
+            if (err != ERROR_ALREADY_EXISTS) {
+                LogError("Failed to create destination directory: " + destPath + ", error: " + std::to_string(err));
+                return false;
+            }
+        }
+        LogInfo("Destination directory created successfully");
     }
     
     attrs = GetFileAttributesW(wZipPath.c_str());
