@@ -127,7 +127,7 @@ LPVOID CreateChinaMirrorEnvBlock() {
         std::string entry = p;
         if (entry.find("UV_INDEX_URL=") == 0 || entry.find("UV_EXTRA_INDEX_URL=") == 0) continue;
         if (entry.find("UV_PYTHON_INSTALL_MIRROR=") == 0) continue;
-        if (entry.find("UV_INSTALLER_GITHUB_BASE_URL=") == 0) continue;
+        if (entry.find("installer_base_url") == 0) continue;
         
         envBlock += entry + '\0';
     }
@@ -258,64 +258,127 @@ std::string HttpGet(const std::string& host, const std::string& path) {
 }
 
 bool DownloadFile(const std::string& url, const std::string& localPath) {
+    LogInfo("=== DownloadFile started ===");
+    LogInfo("URL: " + url);
+    LogInfo("Local path: " + localPath);
+    
     std::string host, path;
     size_t protoEnd = url.find("://");
-    if (protoEnd == std::string::npos) return false;
+    if (protoEnd == std::string::npos) {
+        LogError("Invalid URL format: no protocol found");
+        return false;
+    }
     
     std::string afterProto = url.substr(protoEnd + 3);
     size_t pathStart = afterProto.find('/');
-    if (pathStart == std::string::npos) return false;
+    if (pathStart == std::string::npos) {
+        LogError("Invalid URL format: no path found");
+        return false;
+    }
     
     host = afterProto.substr(0, pathStart);
     path = afterProto.substr(pathStart);
+    
+    LogInfo("Host: " + host);
+    LogInfo("Path: " + path);
 
     HINTERNET hSession = WinHttpOpen(L"ZASCA-Updater/1.0", WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, NULL, NULL, 0);
-    if (!hSession) return false;
+    if (!hSession) {
+        LogError("WinHttpOpen failed: " + std::to_string(GetLastError()));
+        return false;
+    }
 
-    std::wstring wHost(host.begin(), host.end());
+    std::wstring wHost = Utf8ToWide(host);
     bool isHttps = (url.find("https://") == 0);
     INTERNET_PORT port = isHttps ? INTERNET_DEFAULT_HTTPS_PORT : INTERNET_DEFAULT_HTTP_PORT;
     
     HINTERNET hConnect = WinHttpConnect(hSession, wHost.c_str(), port, 0);
-    if (!hConnect) { WinHttpCloseHandle(hSession); return false; }
+    if (!hConnect) {
+        LogError("WinHttpConnect failed: " + std::to_string(GetLastError()));
+        WinHttpCloseHandle(hSession);
+        return false;
+    }
 
-    std::wstring wPath(path.begin(), path.end());
+    std::wstring wPath = Utf8ToWide(path);
     DWORD flags = isHttps ? WINHTTP_FLAG_SECURE : 0;
     HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", wPath.c_str(), NULL, NULL, NULL, flags);
-    if (!hRequest) { WinHttpCloseHandle(hConnect); WinHttpCloseHandle(hSession); return false; }
+    if (!hRequest) {
+        LogError("WinHttpOpenRequest failed: " + std::to_string(GetLastError()));
+        WinHttpCloseHandle(hConnect);
+        WinHttpCloseHandle(hSession);
+        return false;
+    }
 
     BOOL bResults = WinHttpSendRequest(hRequest, NULL, 0, NULL, 0, 0, 0);
-    if (bResults) {
-        bResults = WinHttpReceiveResponse(hRequest, NULL);
-        if (bResults) {
-            std::ofstream outFile(localPath, std::ios::binary);
-            if (!outFile.is_open()) {
-                WinHttpCloseHandle(hRequest);
-                WinHttpCloseHandle(hConnect);
-                WinHttpCloseHandle(hSession);
-                return false;
-            }
-
-            DWORD dwSize = 0;
-            do {
-                DWORD dwDownloaded = 0;
-                if (!WinHttpQueryDataAvailable(hRequest, &dwSize)) break;
-                if (dwSize == 0) break;
-                
-                std::vector<char> buffer(dwSize);
-                if (!WinHttpReadData(hRequest, &buffer[0], dwSize, &dwDownloaded)) break;
-                
-                outFile.write(&buffer[0], dwDownloaded);
-            } while (dwSize > 0);
-            
-            outFile.close();
-        }
+    if (!bResults) {
+        LogError("WinHttpSendRequest failed: " + std::to_string(GetLastError()));
+        WinHttpCloseHandle(hRequest);
+        WinHttpCloseHandle(hConnect);
+        WinHttpCloseHandle(hSession);
+        return false;
     }
+
+    bResults = WinHttpReceiveResponse(hRequest, NULL);
+    if (!bResults) {
+        LogError("WinHttpReceiveResponse failed: " + std::to_string(GetLastError()));
+        WinHttpCloseHandle(hRequest);
+        WinHttpCloseHandle(hConnect);
+        WinHttpCloseHandle(hSession);
+        return false;
+    }
+
+    DWORD dwStatusCode = 0;
+    DWORD dwSize = sizeof(dwStatusCode);
+    WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, NULL, &dwStatusCode, &dwSize, NULL);
+    LogInfo("HTTP Status Code: " + std::to_string(dwStatusCode));
+    
+    if (dwStatusCode != 200) {
+        LogError("HTTP request failed with status: " + std::to_string(dwStatusCode));
+        WinHttpCloseHandle(hRequest);
+        WinHttpCloseHandle(hConnect);
+        WinHttpCloseHandle(hSession);
+        return false;
+    }
+
+    std::ofstream outFile(localPath, std::ios::binary);
+    if (!outFile.is_open()) {
+        LogError("Failed to create file: " + localPath);
+        WinHttpCloseHandle(hRequest);
+        WinHttpCloseHandle(hConnect);
+        WinHttpCloseHandle(hSession);
+        return false;
+    }
+
+    DWORD totalDownloaded = 0;
+    dwSize = 0;
+    do {
+        DWORD dwDownloaded = 0;
+        if (!WinHttpQueryDataAvailable(hRequest, &dwSize)) {
+            LogError("WinHttpQueryDataAvailable failed: " + std::to_string(GetLastError()));
+            break;
+        }
+        if (dwSize == 0) break;
+        
+        std::vector<char> buffer(dwSize);
+        if (!WinHttpReadData(hRequest, &buffer[0], dwSize, &dwDownloaded)) {
+            LogError("WinHttpReadData failed: " + std::to_string(GetLastError()));
+            break;
+        }
+        
+        outFile.write(&buffer[0], dwDownloaded);
+        totalDownloaded += dwDownloaded;
+    } while (dwSize > 0);
+    
+    outFile.close();
+    
+    LogInfo("Total downloaded: " + std::to_string(totalDownloaded) + " bytes");
 
     WinHttpCloseHandle(hRequest);
     WinHttpCloseHandle(hConnect);
     WinHttpCloseHandle(hSession);
-    return bResults == TRUE;
+    
+    LogInfo("=== DownloadFile completed ===");
+    return totalDownloaded > 0;
 }
 
 std::string ExtractFirstJsonObject(const std::string& json) {
@@ -891,16 +954,49 @@ bool ExtractZip(const std::string& zipPath, const std::string& destPath) {
 
 bool UpdateFromRelease(const std::string& zipUrl) {
     std::string tempZip = GetTempFilePath() + ".zip";
-    std::string tempDir = GetTempFilePath();
+    std::string tempDir = tempZip.substr(0, tempZip.length() - 4);
     CreateDirectoryA(tempDir.c_str(), NULL);
+    
+    LogInfo("=== UpdateFromRelease started ===");
+    LogInfo("Download URL: " + zipUrl);
+    LogInfo("Temp ZIP file: " + tempZip);
+    LogInfo("Temp directory: " + tempDir);
     
     ShowMessage("更新中", "正在下载最新版本...", MB_ICONINFORMATION);
     
     if (!DownloadFile(zipUrl, tempZip)) {
+        LogError("Download failed");
         ShowMessage("错误", "下载失败，请检查网络连接。", MB_ICONERROR);
         DeleteFileA(tempZip.c_str());
         RemoveDirectoryA(tempDir.c_str());
         return false;
+    }
+    
+    LogInfo("Download completed successfully");
+    
+    DWORD zipAttrs = GetFileAttributesA(tempZip.c_str());
+    if (zipAttrs == INVALID_FILE_ATTRIBUTES) {
+        LogError("ZIP file does not exist after download: " + tempZip);
+        ShowMessage("错误", "下载的文件不存在。", MB_ICONERROR);
+        DeleteFileA(tempZip.c_str());
+        RemoveDirectoryA(tempDir.c_str());
+        return false;
+    }
+    
+    LARGE_INTEGER fileSize;
+    HANDLE hFile = CreateFileA(tempZip.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
+    if (hFile != INVALID_HANDLE_VALUE) {
+        GetFileSizeEx(hFile, &fileSize);
+        CloseHandle(hFile);
+        LogInfo("ZIP file size: " + std::to_string(fileSize.QuadPart) + " bytes");
+        
+        if (fileSize.QuadPart < 1024) {
+            LogError("ZIP file too small, likely corrupted");
+            ShowMessage("错误", "下载的文件太小，可能已损坏。", MB_ICONERROR);
+            DeleteFileA(tempZip.c_str());
+            RemoveDirectoryA(tempDir.c_str());
+            return false;
+        }
     }
     
     ShowMessage("更新中", "正在解压文件...", MB_ICONINFORMATION);
