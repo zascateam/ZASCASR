@@ -842,6 +842,33 @@ void AutoInitOnFirstRun() {
     std::string exeDir = GetExeDirectory();
     bool initSuccess = false;
     
+    int updateChoice = ShowMessage("初始化", "是否拉取最新版本？\n\n【是】：从 GitHub 拉取最新版本后初始化\n【否】：直接使用当前代码初始化", MB_YESNO | MB_ICONQUESTION);
+    
+    if (updateChoice == IDYES) {
+        ShowMessage("检查更新", "正在检查最新版本...", MB_ICONINFORMATION);
+        
+        std::string response = HttpGet(GITHUB_API_URL, GITHUB_RELEASES_PATH);
+        if (!response.empty()) {
+            std::string firstRelease = ExtractFirstJsonObject(response);
+            if (!firstRelease.empty()) {
+                std::string zipUrl = ParseJsonString(firstRelease, "zipball_url");
+                std::string tagName = ParseJsonString(firstRelease, "tag_name");
+                
+                if (!zipUrl.empty()) {
+                    std::string msg = "发现最新版本: " + tagName + "\n\n下载源: " + zipUrl;
+                    ShowMessage("下载中", msg, MB_ICONINFORMATION);
+                    
+                    if (UpdateFromRelease(zipUrl)) {
+                        ShowMessage("成功", "更新完成！", MB_ICONINFORMATION);
+                    } else {
+                        int retry = ShowMessage("更新失败", "更新失败，是否继续使用当前代码初始化？", MB_YESNO | MB_ICONWARNING);
+                        if (retry != IDYES) return;
+                    }
+                }
+            }
+        }
+    }
+    
     if (RunCommand("where uv") != 0) {
         ShowMessage("提示", "未检测到 uv，正在通过国内代理自动安装...", MB_ICONINFORMATION);
         if (!InstallUv()) {
