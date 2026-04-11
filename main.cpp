@@ -934,7 +934,13 @@ bool ExtractZip(const std::string& zipPath, const std::string& destPath) {
             return false;
         }
         LogInfo("Destination directory created successfully");
-        Sleep(100);
+    }
+    
+    std::string tempFile = destPath + "\\.placeholder";
+    HANDLE hTemp = CreateFileA(tempFile.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hTemp != INVALID_HANDLE_VALUE) {
+        CloseHandle(hTemp);
+        LogDebug("Created placeholder file in destination directory");
     }
     
     attrs = GetFileAttributesW(wDestPath.c_str());
@@ -1075,6 +1081,10 @@ bool ExtractZip(const std::string& zipPath, const std::string& destPath) {
         LogError("Extraction timeout after 60 seconds");
     }
     
+    std::string tempFile = destPath + "\\.placeholder";
+    DeleteFileA(tempFile.c_str());
+    LogDebug("Removed placeholder file");
+    
     pItems->Release();
     pDestFolder->Release();
     pZipFile->Release();
@@ -1088,7 +1098,7 @@ bool ExtractZip(const std::string& zipPath, const std::string& destPath) {
 bool UpdateFromRelease(const std::string& zipUrl) {
     std::string tempZip = GetTempFilePath() + ".zip";
     std::string tempDir = tempZip.substr(0, tempZip.length() - 4);
-    CreateDirectoryA(tempDir.c_str(), NULL);
+    SHCreateDirectoryExA(NULL, tempDir.c_str(), NULL);
     
     LogInfo("=== UpdateFromRelease started ===");
     LogInfo("Download URL: " + zipUrl);
