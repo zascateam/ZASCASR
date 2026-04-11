@@ -19,6 +19,7 @@
 #define DISPLAY_NAME "Django Environment Guard Service"
 #define GITHUB_API_URL "api.zasca.cc.cd"
 #define GITHUB_RELEASES_PATH "/repos/trustedinster/ZASCA/releases"
+#define IDR_UV_INSTALLER 101
 
 SERVICE_STATUS        g_ServiceStatus = {0};
 SERVICE_STATUS_HANDLE g_StatusHandle = NULL;
@@ -65,6 +66,8 @@ std::string GetExeDirectory();
 bool UpdateFromRelease(const std::string& zipUrl);
 bool CopyDirectoryRecursive(const std::string& srcPath, const std::string& destPath);
 bool RemoveDirectoryRecursive(const std::string& dirPath);
+bool ExtractUvInstaller(std::string& outPath);
+bool InstallUv();
 
 std::wstring Utf8ToWide(const std::string& str) {
     if (str.empty()) return std::wstring();
@@ -73,6 +76,64 @@ std::wstring Utf8ToWide(const std::string& str) {
     std::wstring result(size - 1, 0);
     MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &result[0], size);
     return result;
+}
+
+bool ExtractUvInstaller(std::string& outPath) {
+    HMODULE hModule = GetModuleHandleA(NULL);
+    HRSRC hResource = FindResourceA(hModule, MAKEINTRESOURCEA(IDR_UV_INSTALLER), RT_RCDATA);
+    if (!hResource) {
+        LogError("Failed to find UV installer resource");
+        return false;
+    }
+    
+    HGLOBAL hData = LoadResource(hModule, hResource);
+    if (!hData) {
+        LogError("Failed to load UV installer resource");
+        return false;
+    }
+    
+    DWORD size = SizeofResource(hModule, hResource);
+    const char* data = (const char*)LockResource(hData);
+    if (!data || size == 0) {
+        LogError("Failed to lock UV installer resource");
+        return false;
+    }
+    
+    char tempPath[MAX_PATH];
+    GetTempPathA(MAX_PATH, tempPath);
+    char tempFile[MAX_PATH];
+    GetTempFileNameA(tempPath, "uv", 0, tempFile);
+    
+    std::string scriptPath = std::string(tempFile) + ".ps1";
+    MoveFileA(tempFile, scriptPath.c_str());
+    
+    std::ofstream outFile(scriptPath, std::ios::binary);
+    if (!outFile) {
+        LogError("Failed to create temp script file");
+        return false;
+    }
+    
+    outFile.write(data, size);
+    outFile.close();
+    
+    outPath = scriptPath;
+    LogInfo("Extracted UV installer to: " + scriptPath);
+    return true;
+}
+
+bool InstallUv() {
+    std::string scriptPath;
+    if (!ExtractUvInstaller(scriptPath)) {
+        LogError("Failed to extract UV installer script");
+        return false;
+    }
+    
+    std::string cmd = "powershell -ExecutionPolicy ByPass -NoProfile -File \"" + scriptPath + "\"";
+    DWORD result = RunCommand(cmd);
+    
+    DeleteFileA(scriptPath.c_str());
+    
+    return result == 0;
 }
 
 int ShowMessage(const std::string& title, const std::string& msg, UINT type = MB_OK) {
@@ -133,7 +194,7 @@ LPVOID CreateChinaMirrorEnvBlock() {
     }
     FreeEnvironmentStrings(parentEnv);
 
-    envBlock += "UV_INSTALLER_GITHUB_BASE_URL=https://zasca.cc.cd/https://github.com/\0";
+    envBlock += "UV_INSTALLER_GITHUB_BASE_URL=https://zasca.cc.cd/\0";
     envBlock += "UV_PYTHON_INSTALL_MIRROR=https://mirrors.tuna.tsinghua.edu.cn/python/\0";
     envBlock += "UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple\0";
     
@@ -761,7 +822,7 @@ void AutoInitOnFirstRun() {
     
     if (RunCommand("where uv") != 0) {
         ShowMessage("提示", "未检测到 uv，正在通过国内代理自动安装...", MB_ICONINFORMATION);
-        if (RunCommand("powershell -ExecutionPolicy ByPass -NoProfile -Command \"irm https://astral.sh/uv/install.ps1 | iex\"") != 0) {
+        if (!InstallUv()) {
             ShowMessage("错误", "uv 安装失败。可能是 GitHub 代理失效，请尝试手动安装 uv。", MB_ICONERROR);
             return;
         }
@@ -1280,7 +1341,7 @@ void HandleInit() {
     if (RunCommand("where uv") != 0) {
         LogInfo("uv not found, installing...");
         ShowMessage("提示", "未检测到 uv，正在通过国内代理自动安装...", MB_ICONINFORMATION);
-        if (RunCommand("powershell -ExecutionPolicy ByPass -NoProfile -Command \"irm https://astral.sh/uv/install.ps1 | iex\"") != 0) {
+        if (!InstallUv()) {
             LogError("uv installation failed");
             ShowMessage("错误", "uv 安装失败。可能是 GitHub 代理失效，请尝试手动安装 uv。", MB_ICONERROR); return;
         }
@@ -1326,7 +1387,7 @@ void RefreshEnvironment() { SendMessageTimeout(HWND_BROADCAST, WM_SETTINGCHANGE,
 
 void WorkerThread() {
     if (RunCommand("where uv") != 0) {
-        if (RunCommand("powershell -ExecutionPolicy ByPass -NoProfile -Command \"irm https://astral.sh/uv/install.ps1 | iex\"") != 0) return;
+        if (!InstallUv()) return;
         RefreshEnvironment();
     }
     if (RunCommand("uv sync", true) != 0) return;

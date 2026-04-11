@@ -1,2 +1,5 @@
 #define RT_MANIFEST 24
 1 RT_MANIFEST "zasca-guard.manifest"
+
+#define IDR_UV_INSTALLER 101
+IDR_UV_INSTALLER RCDATA "uv-installer.ps1"
