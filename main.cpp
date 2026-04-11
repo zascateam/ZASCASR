@@ -901,14 +901,19 @@ bool ExtractZip(const std::string& zipPath, const std::string& destPath) {
     DWORD attrs = GetFileAttributesW(wDestPath.c_str());
     if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
         LogInfo("Destination directory does not exist, creating: " + destPath);
-        if (!CreateDirectoryA(destPath.c_str(), NULL)) {
-            DWORD err = GetLastError();
-            if (err != ERROR_ALREADY_EXISTS) {
-                LogError("Failed to create destination directory: " + destPath + ", error: " + std::to_string(err));
-                return false;
-            }
+        int result = SHCreateDirectoryExA(NULL, destPath.c_str(), NULL);
+        if (result != ERROR_SUCCESS && result != ERROR_ALREADY_EXISTS) {
+            LogError("Failed to create destination directory: " + destPath + ", error: " + std::to_string(result));
+            return false;
         }
         LogInfo("Destination directory created successfully");
+        Sleep(100);
+    }
+    
+    attrs = GetFileAttributesW(wDestPath.c_str());
+    if (attrs == INVALID_FILE_ATTRIBUTES) {
+        LogError("Destination directory still not accessible after creation");
+        return false;
     }
     
     attrs = GetFileAttributesW(wZipPath.c_str());
