@@ -730,43 +730,155 @@ void AutoInitOnFirstRun() {
 }
 
 bool ExtractZip(const std::string& zipPath, const std::string& destPath) {
-    std::wstring wZipPath(zipPath.begin(), zipPath.end());
-    std::wstring wDestPath(destPath.begin(), destPath.end());
+    LogInfo("=== ExtractZip started ===");
+    LogInfo("ZIP file: " + zipPath);
+    LogInfo("Destination: " + destPath);
+    
+    std::wstring wZipPath = Utf8ToWide(zipPath);
+    std::wstring wDestPath = Utf8ToWide(destPath);
+    
+    if (wZipPath.empty() || wDestPath.empty()) {
+        LogError("Failed to convert paths to wide string");
+        return false;
+    }
+    
+    DWORD attrs = GetFileAttributesW(wDestPath.c_str());
+    if (attrs == INVALID_FILE_ATTRIBUTES || !(attrs & FILE_ATTRIBUTE_DIRECTORY)) {
+        LogError("Destination directory does not exist: " + destPath);
+        return false;
+    }
+    
+    attrs = GetFileAttributesW(wZipPath.c_str());
+    if (attrs == INVALID_FILE_ATTRIBUTES) {
+        LogError("ZIP file does not exist: " + zipPath);
+        return false;
+    }
     
     HRESULT hr = CoInitialize(NULL);
-    if (FAILED(hr)) return false;
+    if (FAILED(hr)) {
+        LogError("CoInitialize failed: " + std::to_string(hr));
+        return false;
+    }
+    LogDebug("COM initialized");
     
     IShellDispatch* pShell = NULL;
     hr = CoCreateInstance(CLSID_Shell, NULL, CLSCTX_INPROC_SERVER, IID_IShellDispatch, (void**)&pShell);
-    if (FAILED(hr)) { CoUninitialize(); return false; }
+    if (FAILED(hr)) {
+        LogError("CoCreateInstance failed: " + std::to_string(hr));
+        CoUninitialize();
+        return false;
+    }
+    LogDebug("Shell instance created");
     
     Folder* pZipFile = NULL;
-    VARIANT varZipPath; varZipPath.vt = VT_BSTR; varZipPath.bstrVal = SysAllocString(wZipPath.c_str());
+    VARIANT varZipPath; 
+    varZipPath.vt = VT_BSTR; 
+    varZipPath.bstrVal = SysAllocString(wZipPath.c_str());
     hr = pShell->NameSpace(varZipPath, &pZipFile);
     SysFreeString(varZipPath.bstrVal);
     
-    if (FAILED(hr) || !pZipFile) { pShell->Release(); CoUninitialize(); return false; }
+    if (FAILED(hr) || !pZipFile) {
+        LogError("Failed to open ZIP file: " + zipPath + ", hr: " + std::to_string(hr));
+        pShell->Release();
+        CoUninitialize();
+        return false;
+    }
+    LogDebug("ZIP file opened successfully");
     
     Folder* pDestFolder = NULL;
-    VARIANT varDestPath; varDestPath.vt = VT_BSTR; varDestPath.bstrVal = SysAllocString(wDestPath.c_str());
+    VARIANT varDestPath; 
+    varDestPath.vt = VT_BSTR; 
+    varDestPath.bstrVal = SysAllocString(wDestPath.c_str());
     hr = pShell->NameSpace(varDestPath, &pDestFolder);
     SysFreeString(varDestPath.bstrVal);
     
-    if (FAILED(hr) || !pDestFolder) { pZipFile->Release(); pShell->Release(); CoUninitialize(); return false; }
+    if (FAILED(hr) || !pDestFolder) {
+        LogError("Failed to open destination folder: " + destPath + ", hr: " + std::to_string(hr));
+        pZipFile->Release();
+        pShell->Release();
+        CoUninitialize();
+        return false;
+    }
+    LogDebug("Destination folder opened successfully");
     
     FolderItems* pItems = NULL;
     hr = pZipFile->Items(&pItems);
-    if (FAILED(hr) || !pItems) { pDestFolder->Release(); pZipFile->Release(); pShell->Release(); CoUninitialize(); return false; }
+    if (FAILED(hr) || !pItems) {
+        LogError("Failed to get ZIP items, hr: " + std::to_string(hr));
+        pDestFolder->Release();
+        pZipFile->Release();
+        pShell->Release();
+        CoUninitialize();
+        return false;
+    }
     
     long itemCount = 0;
     pItems->get_Count(&itemCount);
+    LogInfo("ZIP contains " + std::to_string(itemCount) + " items");
     
-    VARIANT varItems; varItems.vt = VT_DISPATCH; varItems.pdispVal = (IDispatch*)pItems;
-    VARIANT varOptions; varOptions.vt = VT_I4; varOptions.lVal = 0;
+    if (itemCount == 0) {
+        LogError("ZIP file is empty");
+        pItems->Release();
+        pDestFolder->Release();
+        pZipFile->Release();
+        pShell->Release();
+        CoUninitialize();
+        return false;
+    }
     
+    VARIANT varItems; 
+    varItems.vt = VT_DISPATCH; 
+    varItems.pdispVal = (IDispatch*)pItems;
+    VARIANT varOptions; 
+    varOptions.vt = VT_I4; 
+    varOptions.lVal = 0;
+    
+    LogInfo("Starting extraction...");
     hr = pDestFolder->CopyHere(varItems, varOptions);
     
-    Sleep(1000);
+    if (FAILED(hr)) {
+        LogError("CopyHere failed: " + std::to_string(hr));
+        pItems->Release();
+        pDestFolder->Release();
+        pZipFile->Release();
+        pShell->Release();
+        CoUninitialize();
+        return false;
+    }
+    
+    LogDebug("Waiting for extraction to complete...");
+    bool extractionComplete = false;
+    for (int i = 0; i < 60; i++) {
+        Sleep(1000);
+        
+        long currentCount = 0;
+        pItems->get_Count(&currentCount);
+        
+        WIN32_FIND_DATAA findData;
+        std::string searchPath = destPath + "\\*";
+        HANDLE hFind = FindFirstFileA(searchPath.c_str(), &findData);
+        if (hFind != INVALID_HANDLE_VALUE) {
+            int extractedCount = 0;
+            do {
+                if (strcmp(findData.cFileName, ".") != 0 && strcmp(findData.cFileName, "..") != 0) {
+                    extractedCount++;
+                }
+            } while (FindNextFileA(hFind, &findData));
+            FindClose(hFind);
+            
+            if (extractedCount >= itemCount) {
+                extractionComplete = true;
+                LogInfo("Extraction completed after " + std::to_string(i + 1) + " seconds");
+                break;
+            }
+        }
+        
+        LogDebug("Waiting... (" + std::to_string(i + 1) + "s), extracted items: " + std::to_string(extractedCount));
+    }
+    
+    if (!extractionComplete) {
+        LogError("Extraction timeout after 60 seconds");
+    }
     
     pItems->Release();
     pDestFolder->Release();
@@ -774,7 +886,8 @@ bool ExtractZip(const std::string& zipPath, const std::string& destPath) {
     pShell->Release();
     CoUninitialize();
     
-    return SUCCEEDED(hr);
+    LogInfo("=== ExtractZip completed ===");
+    return extractionComplete;
 }
 
 bool UpdateFromRelease(const std::string& zipUrl) {
