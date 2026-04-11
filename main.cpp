@@ -934,13 +934,16 @@ bool ExtractZip(const std::string& zipPath, const std::string& destPath) {
             return false;
         }
         LogInfo("Destination directory created successfully");
+        Sleep(200);
     }
     
     std::string tempFile = destPath + "\\.placeholder";
     HANDLE hTemp = CreateFileA(tempFile.c_str(), GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hTemp != INVALID_HANDLE_VALUE) {
+    if (hTemp == INVALID_HANDLE_VALUE) {
+        LogError("Failed to create placeholder file, error: " + std::to_string(GetLastError()));
+    } else {
         CloseHandle(hTemp);
-        LogDebug("Created placeholder file in destination directory");
+        LogInfo("Created placeholder file: " + tempFile);
     }
     
     attrs = GetFileAttributesW(wDestPath.c_str());
