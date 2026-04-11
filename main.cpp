@@ -96,6 +96,7 @@ bool ExtractUvInstaller(std::string& outPath) {
     const char* data = (const char*)LockResource(hData);
     if (!data || size == 0) {
         LogError("Failed to lock UV installer resource");
+        FreeResource(hData);
         return false;
     }
     
@@ -110,11 +111,14 @@ bool ExtractUvInstaller(std::string& outPath) {
     std::ofstream outFile(scriptPath, std::ios::binary);
     if (!outFile) {
         LogError("Failed to create temp script file");
+        FreeResource(hData);
         return false;
     }
     
     outFile.write(data, size);
     outFile.close();
+    
+    FreeResource(hData);
     
     outPath = scriptPath;
     LogInfo("Extracted UV installer to: " + scriptPath);
