@@ -172,6 +172,8 @@ void InitConsole() {
         setvbuf(stdout, NULL, _IONBF, 0);
         setvbuf(stderr, NULL, _IONBF, 0);
     }
+    SetConsoleOutputCP(65001);
+    SetConsoleCP(65001);
 }
 
 void ConsolePrint(const std::string& msg) {
