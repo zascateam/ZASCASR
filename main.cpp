@@ -162,6 +162,38 @@ int ShowMessage(const std::string& title, const std::string& msg, UINT type = MB
     return MessageBoxW(NULL, Utf8ToWide(msg).c_str(), Utf8ToWide(title).c_str(), type | MB_TOPMOST);
 }
 
+void InitConsole() {
+    if (!GetConsoleWindow()) {
+        if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
+            AllocConsole();
+        }
+        freopen("CONOUT$", "w", stdout);
+        freopen("CONOUT$", "w", stderr);
+        setvbuf(stdout, NULL, _IONBF, 0);
+        setvbuf(stderr, NULL, _IONBF, 0);
+    }
+}
+
+void ConsolePrint(const std::string& msg) {
+    std::cout << msg << std::endl;
+}
+
+void PrintInfo(const std::string& msg) {
+    ConsolePrint("[INFO] " + msg);
+}
+
+void PrintSuccess(const std::string& msg) {
+    ConsolePrint("[OK] " + msg);
+}
+
+void PrintWarning(const std::string& msg) {
+    ConsolePrint("[WARN] " + msg);
+}
+
+void PrintError(const std::string& msg) {
+    ConsolePrint("[ERROR] " + msg);
+}
+
 bool IsNumber(const std::string& s) {
     if (s.empty()) return false;
     for (char c : s) if (!std::isdigit(c)) return false;
@@ -832,12 +864,76 @@ bool SetDirectoryPermissionsAdminOnly(const std::string& dirPath) {
     return (result == ERROR_SUCCESS);
 }
 
+bool ResetDirectoryPermissionsToInherited(const std::string& dirPath) {
+    PACL pOldDACL = NULL;
+    PSECURITY_DESCRIPTOR pSD = NULL;
+
+    DWORD result = GetNamedSecurityInfoA(dirPath.c_str(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, NULL, NULL, &pOldDACL, NULL, &pSD);
+    if (result != ERROR_SUCCESS) {
+        if (pSD) LocalFree(pSD);
+        return false;
+    }
+
+    ACL_SIZE_INFORMATION asi = {};
+    if (!GetAclInformation(pOldDACL, &asi, sizeof(asi), AclSizeInformation)) {
+        LocalFree(pSD);
+        return false;
+    }
+
+    std::vector<EXPLICIT_ACCESSA> eaList;
+    for (DWORD i = 0; i < asi.AceCount; i++) {
+        LPVOID pAce = NULL;
+        if (!GetAce(pOldDACL, i, &pAce)) continue;
+        ACE_HEADER* pAceHeader = (ACE_HEADER*)pAce;
+        if (pAceHeader->AceFlags & INHERITED_ACE) continue;
+
+        EXPLICIT_ACCESSA ea = {};
+        ea.grfAccessMode = REVOKE_ACCESS;
+        ea.grfInheritance = NO_INHERITANCE;
+        ea.Trustee.TrusteeForm = TRUSTEE_IS_SID;
+
+        if (pAceHeader->AceType == ACCESS_ALLOWED_ACE_TYPE) {
+            ACCESS_ALLOWED_ACE* pAllowedAce = (ACCESS_ALLOWED_ACE*)pAce;
+            ea.Trustee.ptstrName = (LPSTR)(&pAllowedAce->SidStart);
+        } else if (pAceHeader->AceType == ACCESS_DENIED_ACE_TYPE) {
+            ACCESS_DENIED_ACE* pDeniedAce = (ACCESS_DENIED_ACE*)pAce;
+            ea.Trustee.ptstrName = (LPSTR)(&pDeniedAce->SidStart);
+        } else {
+            continue;
+        }
+
+        eaList.push_back(ea);
+    }
+
+    PACL pNewDACL = NULL;
+    if (eaList.empty()) {
+        pNewDACL = pOldDACL;
+    } else {
+        result = SetEntriesInAclA(static_cast<ULONG>(eaList.size()), eaList.data(), pOldDACL, &pNewDACL);
+        if (result != ERROR_SUCCESS) {
+            LocalFree(pSD);
+            return false;
+        }
+    }
+
+    result = SetNamedSecurityInfoA(
+        (LPSTR)dirPath.c_str(), SE_FILE_OBJECT,
+        DACL_SECURITY_INFORMATION | UNPROTECTED_DACL_SECURITY_INFORMATION,
+        NULL, NULL, pNewDACL, NULL
+    );
+
+    if (pNewDACL != pOldDACL) LocalFree(pNewDACL);
+    LocalFree(pSD);
+
+    return (result == ERROR_SUCCESS);
+}
+
 void AutoInitOnFirstRun() {
     if (!IsFirstRun()) {
         return;
     }
     
-    ShowMessage("首次启动", "检测到首次运行，正在自动初始化...", MB_ICONINFORMATION);
+    PrintInfo("检测到首次运行，正在自动初始化...");
     
     std::string exeDir = GetExeDirectory();
     bool initSuccess = false;
@@ -845,7 +941,7 @@ void AutoInitOnFirstRun() {
     int updateChoice = ShowMessage("初始化", "是否拉取最新版本？\n\n【是】：从 GitHub 拉取最新版本后初始化\n【否】：直接使用当前代码初始化", MB_YESNO | MB_ICONQUESTION);
     
     if (updateChoice == IDYES) {
-        ShowMessage("检查更新", "正在检查最新版本...", MB_ICONINFORMATION);
+        PrintInfo("正在检查最新版本...");
         
         std::string response = HttpGet(GITHUB_API_URL, GITHUB_RELEASES_PATH);
         if (!response.empty()) {
@@ -855,11 +951,10 @@ void AutoInitOnFirstRun() {
                 std::string tagName = ParseJsonString(firstRelease, "tag_name");
                 
                 if (!zipUrl.empty()) {
-                    std::string msg = "发现最新版本: " + tagName + "\n\n下载源: " + zipUrl;
-                    ShowMessage("下载中", msg, MB_ICONINFORMATION);
+                    PrintInfo("发现最新版本: " + tagName + ", 下载源: " + zipUrl);
                     
                     if (UpdateFromRelease(zipUrl)) {
-                        ShowMessage("成功", "更新完成！", MB_ICONINFORMATION);
+                        PrintSuccess("更新完成！");
                     } else {
                         int retry = ShowMessage("更新失败", "更新失败，是否继续使用当前代码初始化？", MB_YESNO | MB_ICONWARNING);
                         if (retry != IDYES) return;
@@ -870,7 +965,7 @@ void AutoInitOnFirstRun() {
     }
     
     if (RunCommand("where uv") != 0) {
-        ShowMessage("提示", "未检测到 uv，正在通过国内代理自动安装...", MB_ICONINFORMATION);
+        PrintInfo("未检测到 uv，正在通过国内代理自动安装...");
         if (!InstallUv()) {
             ShowMessage("错误", "uv 安装失败。可能是 GitHub 代理失效，请尝试手动安装 uv。", MB_ICONERROR);
             return;
@@ -879,10 +974,12 @@ void AutoInitOnFirstRun() {
         Sleep(1000);
     }
     
-    ShowMessage("提示", "即将弹出黑框执行 uv sync...\n(Python解释器和依赖包均使用国内镜像加速)", MB_ICONINFORMATION);
+    PrintInfo("正在执行 uv sync (Python解释器和依赖包均使用国内镜像加速)...");
+    
+    ResetDirectoryPermissionsToInherited(exeDir);
     
     HANDLE hProcess = NULL;
-    if (ExecuteCommand("uv sync", CREATE_NEW_CONSOLE, false, &hProcess)) {
+    if (ExecuteCommand("uv sync", 0, false, &hProcess)) {
         WaitForSingleObject(hProcess, INFINITE);
         DWORD exitCode;
         GetExitCodeProcess(hProcess, &exitCode);
@@ -891,7 +988,7 @@ void AutoInitOnFirstRun() {
         if (exitCode == 0) {
             initSuccess = true;
         } else {
-            ShowMessage("警告", "uv sync 执行异常，请查看弹出的黑框日志。", MB_ICONWARNING);
+            PrintWarning("uv sync 执行异常，请查看上方日志。");
             return;
         }
     } else {
@@ -901,13 +998,13 @@ void AutoInitOnFirstRun() {
     
     if (initSuccess) {
         if (!SetDirectoryPermissionsAdminOnly(exeDir)) {
-            ShowMessage("警告", "初始化完成，但设置目录权限时遇到问题。", MB_ICONWARNING);
+            PrintWarning("初始化完成，但设置目录权限时遇到问题。");
         }
         
         if (MarkAsInitialized()) {
-            ShowMessage("成功", "首次启动初始化完成！\n\n目录权限已设置为仅管理员可访问。", MB_ICONINFORMATION);
+            PrintSuccess("首次启动初始化完成！目录权限已设置为仅管理员可访问。");
         } else {
-            ShowMessage("成功", "首次启动初始化完成！\n\n但标记文件创建失败。", MB_ICONWARNING);
+            PrintWarning("首次启动初始化完成！但标记文件创建失败。");
         }
     }
 }
@@ -1108,7 +1205,7 @@ bool UpdateFromRelease(const std::string& zipUrl) {
     LogInfo("Temp ZIP file: " + tempZip);
     LogInfo("Temp directory: " + tempDir);
     
-    ShowMessage("更新中", "正在下载最新版本...", MB_ICONINFORMATION);
+    PrintInfo("正在下载最新版本...");
     
     if (!DownloadFile(zipUrl, tempZip)) {
         LogError("Download failed");
@@ -1145,7 +1242,7 @@ bool UpdateFromRelease(const std::string& zipUrl) {
         }
     }
     
-    ShowMessage("更新中", "正在解压文件...", MB_ICONINFORMATION);
+    PrintInfo("正在解压文件...");
     
     if (!ExtractZip(tempZip, tempDir)) {
         ShowMessage("错误", "解压失败。", MB_ICONERROR);
@@ -1173,7 +1270,7 @@ bool UpdateFromRelease(const std::string& zipUrl) {
         FindClose(hFind);
     }
     
-    ShowMessage("更新中", "正在复制文件...", MB_ICONINFORMATION);
+    PrintInfo("正在复制文件...");
     
     searchPath = extractedDir + "\\*";
     hFind = FindFirstFileA(searchPath.c_str(), &findData);
@@ -1219,7 +1316,7 @@ bool UpdateFromRelease(const std::string& zipUrl) {
 
 void HandleUpdate() {
     LogInfo("=== HandleUpdate started ===");
-    ShowMessage("检查更新", "正在检查最新版本...", MB_ICONINFORMATION);
+    PrintInfo("正在检查最新版本...");
     
     LogInfo("Fetching releases from GitHub API");
     LogDebug("URL: https://" + std::string(GITHUB_API_URL) + GITHUB_RELEASES_PATH);
@@ -1259,6 +1356,7 @@ void HandleUpdate() {
     LogInfo("  tag_name: " + tagName);
     LogInfo("  zipball_url: " + zipUrl);
     
+    PrintInfo("发现最新版本: " + tagName);
     std::string msg = "发现最新版本: " + tagName + "\n\n是否立即更新？\n\n下载源: " + zipUrl;
     int result = MessageBoxW(NULL, Utf8ToWide(msg).c_str(), Utf8ToWide("发现更新").c_str(), MB_YESNO | MB_ICONQUESTION | MB_TOPMOST);
     
@@ -1266,7 +1364,7 @@ void HandleUpdate() {
         LogInfo("User confirmed update, starting download...");
         if (UpdateFromRelease(zipUrl)) {
             LogInfo("Update completed successfully, restarting...");
-            ShowMessage("成功", "更新完成！程序即将重启。", MB_ICONINFORMATION);
+            PrintSuccess("更新完成！程序即将重启。");
             
             char exePath[MAX_PATH];
             GetModuleFileNameA(NULL, exePath, MAX_PATH);
@@ -1285,7 +1383,7 @@ void HandleUpdate() {
         }
     } else {
         LogInfo("User cancelled update");
-        ShowMessage("取消", "更新已取消。", MB_ICONINFORMATION);
+        PrintInfo("更新已取消。");
     }
     LogInfo("=== HandleUpdate completed ===");
 }
@@ -1306,7 +1404,7 @@ void InstallAndStartService(const std::string& port) {
         std::string icaclsCmd = "icacls \"" + dir + "\" /deny \"Users:(OI)(CI)(DE,DC)\" /deny \"INTERACTIVE:(OI)(CI)(DE,DC)\" /T /C /Q";
         WinExec(icaclsCmd.c_str(), SW_HIDE);
         StartServiceA(schService, 0, NULL);
-        ShowMessage("成功", "服务已启动并在后台守护运行。", MB_ICONINFORMATION);
+        PrintSuccess("服务已启动并在后台守护运行。");
         CloseServiceHandle(schService);
     } else { ShowMessage("错误", "无法创建或打开服务。", MB_ICONERROR); }
     CloseServiceHandle(schSCManager);
@@ -1319,8 +1417,8 @@ void StopAndUninstallService() {
         SERVICE_STATUS status; ControlService(svc, SERVICE_CONTROL_STOP, &status);
         while (GetServiceState() != SERVICE_STOPPED) Sleep(500);
         DeleteService(svc); CloseHandle(svc);
-        ShowMessage("成功", "服务已停止并卸载。", MB_ICONINFORMATION);
-    } else { ShowMessage("提示", "服务未运行或未安装。", MB_ICONINFORMATION); }
+        PrintSuccess("服务已停止并卸载。");
+    } else { PrintInfo("服务未运行或未安装。"); }
     CloseServiceHandle(scm);
 }
 
@@ -1334,7 +1432,7 @@ void HandleControlCommand(const std::string& action, const std::string& port) {
             std::string msg = "检测到服务已在运行。\n\n【是】：关闭现有服务并重新启动。\n【否】：忽略警告，单开一个黑框前台运行(用于多端口调试，不守护)。\n【取消】：放弃操作。";
             int res = ShowMessage("冲突警告", msg, MB_YESNOCANCEL | MB_ICONWARNING);
             if (res == IDYES) { StopAndUninstallService(); while (GetServiceState() != SERVICE_STOPPED) Sleep(200); InstallAndStartService(port); return; }
-            else if (res == IDNO) { ExecuteCommand("uv run python manage.py runserver " + port, CREATE_NEW_CONSOLE, false); return; }
+            else if (res == IDNO) { ExecuteCommand("uv run python manage.py runserver " + port, 0, false); return; }
             else return;
         } else { InstallAndStartService(port); }
     }
@@ -1343,7 +1441,7 @@ void HandleControlCommand(const std::string& action, const std::string& port) {
 void HandlePassthrough(const std::vector<std::string>& args) {
     std::string fullCmd = "uv run python manage.py";
     for (const auto& arg : args) fullCmd += " " + arg;
-    if (!ExecuteCommand(fullCmd, CREATE_NEW_CONSOLE, false)) {
+    if (!ExecuteCommand(fullCmd, 0, false)) {
         ShowMessage("执行出错", "无法启动进程，请检查 uv 和 python 环境。", MB_ICONERROR);
     }
 }
@@ -1361,7 +1459,7 @@ void HandleInit() {
     
     if (updateChoice == IDYES) {
         LogInfo("User chose to update from GitHub");
-        ShowMessage("检查更新", "正在检查最新版本...", MB_ICONINFORMATION);
+        PrintInfo("正在检查最新版本...");
         
         LogInfo("Fetching releases from GitHub API");
         std::string response = HttpGet(GITHUB_API_URL, GITHUB_RELEASES_PATH);
@@ -1399,6 +1497,7 @@ void HandleInit() {
                     LogInfo("  tag_name: " + tagName);
                     LogInfo("  zipball_url: " + zipUrl);
                     
+                    PrintInfo("发现最新版本: " + tagName);
                     std::string msg = "发现最新版本: " + tagName + "\n\n是否立即下载更新？\n\n下载源: " + zipUrl;
                     int result = ShowMessage("发现更新", msg, MB_YESNO | MB_ICONQUESTION);
                     
@@ -1410,7 +1509,7 @@ void HandleInit() {
                             if (retry != IDYES) return;
                         } else {
                             LogInfo("Update completed successfully");
-                            ShowMessage("成功", "更新完成！", MB_ICONINFORMATION);
+                            PrintSuccess("更新完成！");
                         }
                     } else {
                         LogInfo("User declined download");
@@ -1425,7 +1524,7 @@ void HandleInit() {
     LogInfo("Checking for uv installation...");
     if (RunCommand("where uv") != 0) {
         LogInfo("uv not found, installing...");
-        ShowMessage("提示", "未检测到 uv，正在通过国内代理自动安装...", MB_ICONINFORMATION);
+        PrintInfo("未检测到 uv，正在通过国内代理自动安装...");
         if (!InstallUv()) {
             LogError("uv installation failed");
             ShowMessage("错误", "uv 安装失败。可能是 GitHub 代理失效，请尝试手动安装 uv。", MB_ICONERROR); return;
@@ -1437,20 +1536,28 @@ void HandleInit() {
     }
     
     LogInfo("Running uv sync...");
-    ShowMessage("提示", "即将弹出黑框执行 uv sync...\n(Python解释器和依赖包均使用国内镜像加速)", MB_ICONINFORMATION);
+    
+    std::string exeDir = GetExeDirectory();
+    LogInfo("Resetting directory permissions before uv sync...");
+    ResetDirectoryPermissionsToInherited(exeDir);
+    
+    PrintInfo("正在执行 uv sync (Python解释器和依赖包均使用国内镜像加速)...");
     
     HANDLE hProcess = NULL;
-    if (ExecuteCommand("uv sync", CREATE_NEW_CONSOLE, false, &hProcess)) {
+    if (ExecuteCommand("uv sync", 0, false, &hProcess)) {
         WaitForSingleObject(hProcess, INFINITE);
         DWORD exitCode; GetExitCodeProcess(hProcess, &exitCode);
         CloseHandle(hProcess);
         LogInfo("uv sync exit code: " + std::to_string(exitCode));
         if (exitCode == 0) {
             LogInfo("uv sync completed successfully");
-            ShowMessage("成功", "环境初始化 完成。", MB_ICONINFORMATION);
+            if (!SetDirectoryPermissionsAdminOnly(exeDir)) {
+                LogError("Failed to set admin-only permissions after uv sync");
+            }
+            PrintSuccess("环境初始化完成。");
         } else {
             LogError("uv sync failed with exit code: " + std::to_string(exitCode));
-            ShowMessage("警告", "uv sync 执行异常，请查看弹出的黑框日志。", MB_ICONWARNING);
+            PrintWarning("uv sync 执行异常，请查看上方日志。");
         }
     } else {
         LogError("Failed to execute uv sync");
@@ -1565,7 +1672,12 @@ void WorkerThread() {
         if (!InstallUv()) return;
         RefreshEnvironment();
     }
-    if (RunCommand("uv sync", true) != 0) return;
+    {
+        std::string exeDir = GetExeDirectory();
+        ResetDirectoryPermissionsToInherited(exeDir);
+        if (RunCommand("uv sync", true) != 0) return;
+        SetDirectoryPermissionsAdminOnly(exeDir);
+    }
 
     std::string serverCmd = "uv run python manage.py runserver " + g_Port;
     while (WaitForSingleObject(g_ServiceStopEvent, 0) == WAIT_TIMEOUT) {
@@ -1611,6 +1723,8 @@ int main(int argc, char* argv[]) {
         StartServiceCtrlDispatcherA(ServiceTable);
         return 0;
     }
+
+    InitConsole();
 
     AutoInitOnFirstRun();
 
