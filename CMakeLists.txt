@@ -36,8 +36,7 @@ target_link_libraries(zasca-guard PRIVATE
 if(MSVC)
     target_compile_options(zasca-guard PRIVATE /EHsc /W3)
     target_compile_definitions(zasca-guard PRIVATE
-        UNICODE
-        _UNICODE
+        _CRT_SECURE_NO_WARNINGS
         $<$<CONFIG:Release>:NDEBUG>
     )
 endif()
