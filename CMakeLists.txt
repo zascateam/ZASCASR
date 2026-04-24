@@ -17,7 +17,6 @@ add_executable(zasca-guard
     src/win_service.cpp
     src/initializer.cpp
     resources/resource.rc
-    resources/zasca-guard.manifest
 )
 
 target_include_directories(zasca-guard PRIVATE
@@ -40,4 +39,5 @@ if(MSVC)
         _CRT_SECURE_NO_WARNINGS
         $<$<CONFIG:Release>:NDEBUG>
     )
+    set_target_properties(zasca-guard PROPERTIES LINK_FLAGS "/MANIFEST:NO")
 endif()
