@@ -1,6 +1,3 @@
 #include "resource.h"
 
-#define RT_MANIFEST 24
-1 RT_MANIFEST "zasca-guard.manifest"
-
 IDR_UV_INSTALLER RCDATA "uv-installer.ps1"
