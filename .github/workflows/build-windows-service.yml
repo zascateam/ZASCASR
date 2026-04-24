@@ -2,11 +2,12 @@ name: Build Windows Service
 
 on:
   push:
-
     tags:
       - 'v*.*.*'
     paths:
-      - 'main.cpp'
+      - 'src/**'
+      - 'resources/**'
+      - 'CMakeLists.txt'
       - '.github/workflows/build-windows-service.yml'
   pull_request:
     branches:
@@ -39,14 +40,11 @@ jobs:
       with:
         arch: x64
 
-    - name: Create build directory
-      run: mkdir -p build
+    - name: Configure CMake
+      run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
 
-    - name: Compile Windows Service
-      run: |
-        rc.exe /fo build\resource.res resource.rc
-        cl.exe /EHsc /O2 /DNDEBUG /Fe:build\zasca-guard.exe main.cpp build\resource.res /link advapi32.lib user32.lib shell32.lib ole32.lib oleaut32.lib
-      shell: cmd
+    - name: Build with CMake
+      run: cmake --build build --config ${{ env.BUILD_TYPE }}
 
     - name: Get version from branch
       id: get_version
@@ -68,7 +66,10 @@ jobs:
     - name: Create distribution package
       run: |
         mkdir -p dist
-        copy build\zasca-guard.exe dist\
+        copy build\${{ env.BUILD_TYPE }}\zasca-guard.exe dist\
+        if (-not (Test-Path "dist\zasca-guard.exe")) {
+          copy build\zasca-guard.exe dist\
+        }
         echo "# ZASCA Windows Service Guard v${{ steps.get_version.outputs.VERSION }}" > dist\README.txt
         echo "" >> dist\README.txt
         echo "Django Environment Guard Service for Windows" >> dist\README.txt
@@ -99,7 +100,7 @@ jobs:
       uses: actions/upload-artifact@v6
       with:
         name: zasca-guard-windows-x64-v${{ steps.get_version.outputs.VERSION }}
-        path: build\zasca-guard.exe
+        path: dist\zasca-guard.exe
         retention-days: 90
 
     - name: Upload distribution package
