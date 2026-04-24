@@ -39,4 +39,5 @@ if(MSVC)
         _CRT_SECURE_NO_WARNINGS
         $<$<CONFIG:Release>:NDEBUG>
     )
+    set_target_properties(zasca-guard PROPERTIES LINK_FLAGS "/MANIFEST:NO")
 endif()
