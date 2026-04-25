@@ -1,6 +1,7 @@
 #include "uv_installer.h"
 #include "logger.h"
 #include "process.h"
+#include "utils.h"
 #include <windows.h>
 #include <fstream>
 #include "resource.h"
@@ -64,6 +65,7 @@ bool InstallUv() {
 
     std::string cmd = "powershell -ExecutionPolicy ByPass -NoProfile -File \"" + scriptPath + "\"";
     LogInfo("Executing PowerShell installer...");
+    PrintProgressBar("uv安装", 0);
 
     std::string output;
     DWORD result = RunCommandWithOutput(cmd, output);
@@ -73,8 +75,10 @@ bool InstallUv() {
         if (!output.empty()) {
             LogError("PowerShell output:\n" + output);
         }
+        PrintProgressBar("uv安装", 0);
     } else {
         LogInfo("UV installation completed successfully");
+        PrintProgressBar("uv安装", 100);
     }
 
     DeleteFileA(scriptPath.c_str());

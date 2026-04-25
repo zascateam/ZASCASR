@@ -16,3 +16,5 @@ void PrintInfo(const std::string& msg);
 void PrintSuccess(const std::string& msg);
 void PrintWarning(const std::string& msg);
 void PrintError(const std::string& msg);
+void PrintProgress(const std::string& label, int current, int total);
+void PrintProgressBar(const std::string& label, int percent);

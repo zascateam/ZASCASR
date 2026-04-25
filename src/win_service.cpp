@@ -65,7 +65,24 @@ void WorkerThread() {
     {
         std::string exeDir = GetExeDirectory();
         ResetDirectoryPermissionsToInherited(exeDir);
-        if (RunCommand("uv sync", true) != 0) return;
+        PrintProgressBar("uv sync", 0);
+        HANDLE hProcess = NULL;
+        if (ExecuteCommand("uv sync", CREATE_NO_WINDOW, true, &hProcess)) {
+            DWORD exitCode = STILL_ACTIVE;
+            int progress = 0;
+            while (exitCode == STILL_ACTIVE) {
+                Sleep(500);
+                if (!GetExitCodeProcess(hProcess, &exitCode)) break;
+                progress += 5;
+                if (progress > 95) progress = 95;
+                PrintProgressBar("uv sync", progress);
+            }
+            CloseHandle(hProcess);
+            PrintProgressBar("uv sync", 100);
+            if (exitCode != 0) return;
+        } else {
+            return;
+        }
         SetDirectoryPermissionsAdminOnly(exeDir);
     }
 

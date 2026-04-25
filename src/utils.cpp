@@ -126,3 +126,34 @@ void PrintWarning(const std::string& msg) {
 void PrintError(const std::string& msg) {
     ConsolePrint("[ERROR] " + msg);
 }
+
+void PrintProgress(const std::string& label, int current, int total) {
+    if (total <= 0) {
+        ConsolePrint("[" + label + "] " + std::to_string(current));
+        return;
+    }
+    int percent = (current * 100) / total;
+    int filled = (percent * 30) / 100;
+    std::string bar;
+    for (int i = 0; i < 30; i++) {
+        bar += (i < filled) ? '=' : ' ';
+    }
+    std::cout << "\r[" + label + "] [" + bar + "] " + std::to_string(percent) + "% (" + std::to_string(current) + "/" + std::to_string(total) + ")" << std::flush;
+    if (current >= total) {
+        std::cout << std::endl;
+    }
+}
+
+void PrintProgressBar(const std::string& label, int percent) {
+    if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
+    int filled = (percent * 30) / 100;
+    std::string bar;
+    for (int i = 0; i < 30; i++) {
+        bar += (i < filled) ? '=' : ' ';
+    }
+    std::cout << "\r[" + label + "] [" + bar + "] " + std::to_string(percent) + "%" << std::flush;
+    if (percent >= 100) {
+        std::cout << std::endl;
+    }
+}

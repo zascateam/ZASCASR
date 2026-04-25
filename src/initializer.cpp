@@ -85,10 +85,18 @@ void AutoInitOnFirstRun() {
 
     HANDLE hProcess = NULL;
     if (ExecuteCommand("uv sync", 0, false, &hProcess)) {
-        WaitForSingleObject(hProcess, INFINITE);
-        DWORD exitCode;
-        GetExitCodeProcess(hProcess, &exitCode);
+        PrintProgressBar("uv sync", 0);
+        DWORD exitCode = STILL_ACTIVE;
+        int progress = 0;
+        while (exitCode == STILL_ACTIVE) {
+            Sleep(500);
+            if (!GetExitCodeProcess(hProcess, &exitCode)) break;
+            progress += 5;
+            if (progress > 95) progress = 95;
+            PrintProgressBar("uv sync", progress);
+        }
         CloseHandle(hProcess);
+        PrintProgressBar("uv sync", 100);
 
         if (exitCode == 0) {
             initSuccess = true;
@@ -213,9 +221,18 @@ void HandleInit() {
 
     HANDLE hProcess = NULL;
     if (ExecuteCommand("uv sync", 0, false, &hProcess)) {
-        WaitForSingleObject(hProcess, INFINITE);
-        DWORD exitCode; GetExitCodeProcess(hProcess, &exitCode);
+        PrintProgressBar("uv sync", 0);
+        DWORD exitCode = STILL_ACTIVE;
+        int progress = 0;
+        while (exitCode == STILL_ACTIVE) {
+            Sleep(500);
+            if (!GetExitCodeProcess(hProcess, &exitCode)) break;
+            progress += 5;
+            if (progress > 95) progress = 95;
+            PrintProgressBar("uv sync", progress);
+        }
         CloseHandle(hProcess);
+        PrintProgressBar("uv sync", 100);
         LogInfo("uv sync exit code: " + std::to_string(exitCode));
         if (exitCode == 0) {
             LogInfo("uv sync completed successfully");

@@ -149,6 +149,7 @@ bool ExtractZip(const std::string& zipPath, const std::string& destPath) {
 
     LogDebug("Waiting for extraction to complete...");
     bool extractionComplete = false;
+    int lastPercent = -1;
     for (int i = 0; i < 60; i++) {
         Sleep(1000);
 
@@ -167,8 +168,15 @@ bool ExtractZip(const std::string& zipPath, const std::string& destPath) {
             } while (FindNextFileA(hFind, &findData));
             FindClose(hFind);
 
+            int percent = (itemCount > 0) ? (extractedCount * 100) / static_cast<int>(itemCount) : 0;
+            if (percent != lastPercent) {
+                PrintProgressBar("解压", percent);
+                lastPercent = percent;
+            }
+
             if (extractedCount >= itemCount) {
                 extractionComplete = true;
+                PrintProgressBar("解压", 100);
                 LogInfo("Extraction completed after " + std::to_string(i + 1) + " seconds");
                 break;
             }
@@ -275,6 +283,18 @@ bool UpdateFromRelease(const std::string& zipUrl) {
     searchPath = extractedDir + "\\*";
     hFind = FindFirstFileA(searchPath.c_str(), &findData);
 
+    int totalFiles = 0;
+    int copiedFiles = 0;
+    if (hFind != INVALID_HANDLE_VALUE) {
+        do {
+            if (strcmp(findData.cFileName, ".") != 0 && strcmp(findData.cFileName, "..") != 0) {
+                totalFiles++;
+            }
+        } while (FindNextFileA(hFind, &findData));
+        FindClose(hFind);
+    }
+
+    hFind = FindFirstFileA(searchPath.c_str(), &findData);
     if (hFind != INVALID_HANDLE_VALUE) {
         do {
             if (strcmp(findData.cFileName, ".") != 0 && strcmp(findData.cFileName, "..") != 0) {
@@ -286,6 +306,8 @@ bool UpdateFromRelease(const std::string& zipUrl) {
                 } else {
                     CopyFileA(srcPath.c_str(), destPath.c_str(), FALSE);
                 }
+                copiedFiles++;
+                PrintProgress("复制", copiedFiles, totalFiles);
             }
         } while (FindNextFileA(hFind, &findData));
         FindClose(hFind);

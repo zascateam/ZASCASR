@@ -1,6 +1,7 @@
 #include "http_client.h"
 #include "logger.h"
 #include "utils.h"
+#include <windows.h>
 #include <winhttp.h>
 #include <fstream>
 #include <vector>
@@ -181,7 +182,13 @@ bool DownloadFile(const std::string& url, const std::string& localPath) {
     }
 
     DWORD totalDownloaded = 0;
+    DWORD contentLength = 0;
+    DWORD clSize = sizeof(contentLength);
+    WinHttpQueryHeaders(hRequest, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER, NULL, &contentLength, &clSize, NULL);
+    LogInfo("Content-Length: " + std::to_string(contentLength) + " bytes");
+
     dwSize = 0;
+    int lastPercent = -1;
     do {
         DWORD dwDownloaded = 0;
         if (!WinHttpQueryDataAvailable(hRequest, &dwSize)) {
@@ -198,7 +205,19 @@ bool DownloadFile(const std::string& url, const std::string& localPath) {
 
         outFile.write(&buffer[0], dwDownloaded);
         totalDownloaded += dwDownloaded;
+
+        if (contentLength > 0) {
+            int percent = static_cast<int>((static_cast<double>(totalDownloaded) * 100.0) / static_cast<double>(contentLength));
+            if (percent != lastPercent) {
+                PrintProgressBar("下载", percent);
+                lastPercent = percent;
+            }
+        }
     } while (dwSize > 0);
+
+    if (contentLength > 0) {
+        PrintProgressBar("下载", 100);
+    }
 
     outFile.close();
 
