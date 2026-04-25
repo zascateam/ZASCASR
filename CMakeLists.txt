@@ -16,12 +16,11 @@ add_executable(zasca-guard
     src/updater.cpp
     src/win_service.cpp
     src/initializer.cpp
-    resources/resource.rc
+    src/resource.rc
 )
 
 target_include_directories(zasca-guard PRIVATE
     ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/resources
 )
 
 target_link_libraries(zasca-guard PRIVATE

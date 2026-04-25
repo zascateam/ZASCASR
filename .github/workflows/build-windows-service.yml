@@ -6,7 +6,6 @@ on:
       - 'v*.*.*'
     paths:
       - 'src/**'
-      - 'resources/**'
       - 'CMakeLists.txt'
       - '.github/workflows/build-windows-service.yml'
   pull_request:

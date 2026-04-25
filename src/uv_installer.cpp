@@ -53,6 +53,36 @@ bool ExtractUvInstaller(std::string& outPath) {
     return true;
 }
 
+static bool RefreshPathFromRegistry() {
+    HKEY hKey;
+    if (RegOpenKeyExA(HKEY_CURRENT_USER, "Environment", 0, KEY_READ, &hKey) != ERROR_SUCCESS) {
+        LogError("Failed to open HKCU\\Environment registry key");
+        return false;
+    }
+
+    char buffer[32767];
+    DWORD bufferSize = sizeof(buffer);
+    DWORD type;
+    bool success = false;
+
+    if (RegQueryValueExA(hKey, "Path", NULL, &type, (LPBYTE)buffer, &bufferSize) == ERROR_SUCCESS && type == REG_EXPAND_SZ) {
+        char expandedPath[32767];
+        if (ExpandEnvironmentStringsA(buffer, expandedPath, sizeof(expandedPath)) > 0) {
+            if (SetEnvironmentVariableA("PATH", expandedPath)) {
+                LogInfo("Refreshed PATH from registry: " + std::string(expandedPath).substr(0, 200) + "...");
+                success = true;
+            } else {
+                LogError("Failed to set PATH environment variable");
+            }
+        }
+    } else {
+        LogError("Failed to read Path from registry or type mismatch");
+    }
+
+    RegCloseKey(hKey);
+    return success;
+}
+
 bool InstallUv() {
     LogInfo("=== Starting UV installation ===");
 
@@ -83,6 +113,13 @@ bool InstallUv() {
 
     DeleteFileA(scriptPath.c_str());
     LogInfo("Cleaned up installer script: " + scriptPath);
+
+    if (result == 0) {
+        RefreshEnvironment();
+        Sleep(500);
+        RefreshPathFromRegistry();
+    }
+
     LogInfo("=== UV installation finished ===");
 
     return result == 0;
